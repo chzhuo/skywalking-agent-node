@@ -17,19 +17,27 @@
  *
  */
 
-import Span from '../../trace/span/Span';
+import Span from '../../trace/Span';
 import ID from '../../trace/ID';
 import NewID from '../../trace/NewID';
-import SegmentRef from '../../trace/context/SegmentRef';
+import { emitter } from '../../lib/EventEmitter';
 
 export default class Segment {
   segmentId = new ID();
   spans: Span[] = [];
   relatedTraces: ID[] = [new NewID()];
-  references: SegmentRef[] = [];
+  referSpanCount: number = 0;
 
-  archive(span: Span): void {
+  startSpan(span: Span): number {
     this.spans.push(span);
+    this.referSpanCount++;
+    return this.spans.length - 1;
+  }
+  endSpan(span: Span): void {
+    this.referSpanCount--;
+    if (this.referSpanCount === 0) {
+      emitter.emit('segment-finished', this);
+    }
   }
 
   relate(id: ID) {
@@ -41,11 +49,7 @@ export default class Segment {
     }
   }
 
-  refer(ref: SegmentRef): this {
-    if (!this.references.includes(ref)) {
-      this.references.push(ref);
-    }
-
-    return this;
+  get traceId(): string {
+    return this.relatedTraces[0].toString();
   }
 }

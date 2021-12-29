@@ -20,6 +20,8 @@
 import Protocol from '../../../agent/protocol/Protocol';
 import HeartbeatClient from '../../../agent/protocol/grpc/clients/HeartbeatClient';
 import TraceReportClient from '../../../agent/protocol/grpc/clients/TraceReportClient';
+import { context } from '@opentelemetry/api';
+import { suppressTracing } from '@opentelemetry/core';
 
 export default class GrpcProtocol implements Protocol {
   private readonly heartbeatClient: HeartbeatClient;
@@ -35,12 +37,16 @@ export default class GrpcProtocol implements Protocol {
   }
 
   heartbeat(): this {
-    this.heartbeatClient.start();
+    context.with(suppressTracing(context.active()), () => {
+      this.heartbeatClient.start();
+    });
     return this;
   }
 
   report(): this {
-    this.traceReportClient.start();
+    context.with(suppressTracing(context.active()), () => {
+      this.traceReportClient.start();
+    });
     return this;
   }
 }

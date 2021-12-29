@@ -18,28 +18,32 @@
  */
 
 import * as winston from 'winston';
+import * as api from '@opentelemetry/api';
 import { Logger } from 'winston';
+import path from 'path';
 
-type LoggerLevelAware = Logger & {
-  _isDebugEnabled: boolean;
-  _isInfoEnabled: boolean;
-};
+const { splat, combine, printf } = winston.format;
+
+type LoggerLevelAware = Logger;
+
+const myFormat = printf(({ timestamp, level, message, metadata }) => {
+  return `${timestamp} [APM] [${level}] ${message} ${metadata ? JSON.stringify(metadata) : ''}`;
+});
 
 export function createLogger(name: string): LoggerLevelAware {
   const loggingLevel = (process.env.SW_AGENT_LOGGING_LEVEL || 'error').toLowerCase();
 
   const logger = winston.createLogger({
     level: loggingLevel,
-    format: winston.format.json(),
     defaultMeta: {
-      file: name,
+      file: path.basename(name),
     },
   });
 
   if (process.env.NODE_ENV !== 'production' || process.env.SW_LOGGING_TARGET === 'console') {
     logger.add(
       new winston.transports.Console({
-        format: winston.format.prettyPrint(),
+        format: combine(winston.format.metadata(), winston.format.timestamp(), splat(), myFormat),
       }),
     );
   } else {
@@ -50,25 +54,53 @@ export function createLogger(name: string): LoggerLevelAware {
     );
   }
 
-  const loggerLevel = logger.levels[logger.level];
-  const _isDebugEnabled = loggerLevel >= logger.levels.debug;
-  const _isInfoEnabled = loggerLevel >= logger.levels.info;
-
-  Object.assign(logger, {
-    _isDebugEnabled,
-    _isInfoEnabled,
-  });
-
-  const nop = (): void => { /* a cookie for the linter */ };
-
-  if (loggerLevel < logger.levels.debug)  // we do this because logger still seems to stringify anything sent to it even if it is below the logging level, costing performance
-    (logger as any).debug = nop;
-
-  if (loggerLevel < logger.levels.info)
-    (logger as any).info = nop;
-
-  if (loggerLevel < logger.levels.warn)
-    (logger as any).warn = nop;
-
   return logger as LoggerLevelAware;
 }
+
+const getLogLevel = () => {
+  return (process.env.SW_AGENT_LOGGING_LEVEL || 'error').toLowerCase();
+};
+
+const getOTLPLevel = () => {
+  const level = getLogLevel();
+  switch (level) {
+    case 'verbose':
+    case 'verb':
+      return api.DiagLogLevel.VERBOSE;
+    case 'debug':
+      return api.DiagLogLevel.DEBUG;
+    case 'info':
+      return api.DiagLogLevel.INFO;
+    case 'warn':
+      return api.DiagLogLevel.WARN;
+    case 'error':
+      return api.DiagLogLevel.ERROR;
+    default:
+      return api.DiagLogLevel.NONE;
+  }
+};
+
+const createOTLPLogger = () => {
+  const log = createLogger('otlp');
+  const concatArgs = (...args: any[]) => {
+    return args.join('-');
+  };
+  return {
+    verbose: (...args: any[]) => {
+      log.verbose(concatArgs(...args));
+    },
+    debug: (...args: any[]) => {
+      log.debug(concatArgs(...args));
+    },
+    info: (...args: any[]) => {
+      log.info(concatArgs(...args));
+    },
+    warn: (...args: any[]) => {
+      log.warn(concatArgs(...args));
+    },
+    error: (...args: any[]) => {
+      log.error(concatArgs(...args));
+    },
+  };
+};
+api.diag.setLogger(createOTLPLogger(), getOTLPLevel());

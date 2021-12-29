@@ -1,8 +1,5 @@
 {
   "compilerOptions": {
-    "target": "es5",
-    "module": "commonjs",
-    "strict": true,
     "importHelpers": true,
     "moduleResolution": "node",
     "experimentalDecorators": true,
@@ -12,9 +9,25 @@
     "rootDir": ".",
     "baseUrl": ".",
     "resolveJsonModule": true,
-    "declaration": true,
     "allowJs": true,
-    "sourceMap": true
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "declaration": true,
+    "declarationMap": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "commonjs",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "pretty": true,
+    "sourceMap": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "target": "es2017",
+    "incremental": true,
+    "newLine": "LF"
   },
   "references": [
     {
@@ -22,10 +35,6 @@
     }
   ],
   "include": [
-    "**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "**/__tests__/*"
+    "**/*.ts"
   ]
 }

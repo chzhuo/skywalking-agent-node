@@ -55,6 +55,18 @@ export class ContextCarrier extends CarrierItem {
       this.encode(this.clientAddress || ''),
     ].join('-');
   }
+  override toString(): string {
+    return [
+      '1',
+      this.traceId?.toString() || '',
+      this.segmentId?.toString() || '',
+      this.spanId?.toString(),
+      this.service || '',
+      this.serviceInstance || '',
+      this.endpoint || '',
+      this.clientAddress || '',
+    ].join(',');
+  }
 
   set value(val) {
     const parts = val.split('-');
@@ -70,18 +82,17 @@ export class ContextCarrier extends CarrierItem {
   isValid(): boolean {
     return Boolean(
       this.traceId?.rawId &&
-      this.segmentId?.rawId &&
-      this.spanId !== undefined &&
-      !isNaN(this.spanId) &&
-      this.service &&
-      this.endpoint &&
-      this.clientAddress !== undefined
+        this.segmentId?.rawId &&
+        this.spanId !== undefined &&
+        !isNaN(this.spanId) &&
+        this.service &&
+        this.endpoint &&
+        this.clientAddress !== undefined,
     );
   }
 
   public static from(map: { [key: string]: string }): ContextCarrier | undefined {
-    if (!map.hasOwnProperty('sw8'))
-      return;
+    if (!map.hasOwnProperty('sw8')) return;
 
     const carrier = new ContextCarrier();
 

@@ -20,13 +20,19 @@
 import config from '../../../config/AgentConfig';
 import { KeyStringValuePair } from '../../../proto/common/Common_pb';
 import Segment from '../../../trace/context/Segment';
+import Span from '../../../trace/Span';
+import { Component } from './Component';
 import {
   Log,
   RefType,
   SegmentObject,
   SegmentReference,
   SpanObject,
+  SpanType,
+  SpanLayer,
 } from '../../../proto/language-agent/Tracing_pb';
+import * as api from '@opentelemetry/api';
+import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
 
 /**
  * An adapter that adapts {@link Segment} objects to gRPC object {@link SegmentObject}.
@@ -35,55 +41,160 @@ export default class SegmentObjectAdapter extends SegmentObject {
   constructor(segment: Segment) {
     super();
     super
-    .setService(config.serviceName)
-    .setServiceinstance(config.serviceInstance)
-    .setTraceid(segment.relatedTraces[0].toString())
-    .setTracesegmentid(segment.segmentId.toString())
-    .setSpansList(
-      segment.spans.map((span) =>
-        new SpanObject()
-        .setSpanid(span.id)
-        .setParentspanid(span.parentId)
-        .setStarttime(span.startTime)
-        .setEndtime(span.endTime)
-        .setOperationname(span.operation)
-        .setPeer(span.peer)
-        .setSpantype(span.type)
-        .setSpanlayer(span.layer)
-        .setComponentid(span.component.id)
-        .setIserror(span.errored)
-        .setLogsList(
-          span.logs.map((log) =>
-            new Log()
-            .setTime(log.timestamp)
-            .setDataList(
-              log.items.map((logItem) =>
-                new KeyStringValuePair()
-                .setKey(logItem.key)
-                .setValue(logItem.val)),
-            ),
-          ),
-        )
-        .setTagsList(
-          span.tags.map((tag) =>
-            new KeyStringValuePair()
-            .setKey(tag.key)
-            .setValue(tag.val),
-          ),
-        )
-        .setRefsList(
-          span.refs.map((ref) =>
-            new SegmentReference()
-            .setReftype(RefType.CROSSPROCESS)
-            .setTraceid(ref.traceId.toString())
-            .setParenttracesegmentid(ref.segmentId.toString())
-            .setParentspanid(ref.spanId)
-            .setParentservice(ref.service)
-            .setParentserviceinstance(ref.serviceInstance)
-            .setNetworkaddressusedatpeer(ref.clientAddress),
-          ),
-        ),
-      ),
-    );
+      .setService(config.serviceName)
+      .setServiceinstance(config.serviceInstance)
+      .setTraceid(segment.relatedTraces[0].toString())
+      .setTracesegmentid(segment.segmentId.toString())
+      .setSpansList(
+        segment.spans.map((span) => {
+          const obj = new SpanObject()
+            .setSpanid(span.segmentSpanId)
+            .setParentspanid(span.segmentParentSpanId)
+            .setStarttime(getMilliseconds(span.startTime))
+            .setEndtime(getMilliseconds(span.endTime))
+            .setOperationname(span.getEndpoint())
+            .setSpantype(getSpanType(span))
+            .setSpanlayer(getSpanLayer(span))
+            .setComponentid(getComponentid(span))
+            .setIserror(isError(span))
+            .setLogsList(getLogList(span))
+            .setTagsList(getTagsList(span))
+            .setRefsList(
+              span.refs.map((ref) =>
+                new SegmentReference()
+                  .setReftype(RefType.CROSSPROCESS)
+                  .setTraceid(ref.traceId.toString())
+                  .setParenttracesegmentid(ref.segmentId.toString())
+                  .setParentspanid(ref.spanId)
+                  .setParentservice(ref.service)
+                  .setParentserviceinstance(ref.serviceInstance)
+                  .setNetworkaddressusedatpeer(ref.clientAddress),
+              ),
+            );
+
+          const spanType = obj.getSpantype();
+          if (spanType == SpanType.EXIT || spanType == SpanType.ENTRY) {
+            const ip = span.attributes[SemanticAttributes.NET_PEER_IP];
+            const port = span.attributes[SemanticAttributes.NET_PEER_PORT];
+            if (ip && port) {
+              obj.setPeer(ip + ':' + port);
+            }
+          }
+          return obj;
+        }),
+      );
   }
+}
+
+function getMilliseconds(time: api.HrTime): number {
+  return time[0] * 1000 + Math.floor(time[1] / 1000000);
+}
+function getSpanType(span: Span): SpanType {
+  switch (span.kind) {
+    case api.SpanKind.CLIENT:
+    case api.SpanKind.PRODUCER:
+      return SpanType.EXIT;
+    case api.SpanKind.CONSUMER:
+    case api.SpanKind.SERVER:
+      return SpanType.ENTRY;
+    default:
+      return SpanType.LOCAL;
+  }
+}
+
+function getSpanLayer(span: Span): SpanLayer {
+  switch (span.instrumentationLibrary.name) {
+    case '@opentelemetry/instrumentation-mysql':
+    case '@opentelemetry/instrumentation-mysql2':
+    case '@opentelemetry/instrumentation-pg':
+    case '@opentelemetry/instrumentation-ioredis':
+    case '@opentelemetry/instrumentation-redis':
+    case '@opentelemetry/instrumentation-mongodb':
+      return SpanLayer.DATABASE;
+    case '@opentelemetry/instrumentation-graphql':
+    case '@opentelemetry/instrumentation-grpc':
+    case '@opentelemetry/instrumentation-dns':
+      return SpanLayer.RPCFRAMEWORK;
+    case '@opentelemetry/instrumentation-express':
+    case '@opentelemetry/instrumentation-koa':
+    case '@opentelemetry/instrumentation-http':
+      return SpanLayer.HTTP;
+    // case '@opentelemetry/node':
+    //   return SpanLayer.MQ
+    // case '@opentelemetry/node':
+    //   return SpanLayer.CACHE
+  }
+  return SpanLayer.UNKNOWN;
+}
+
+function getComponentid(span: Span): number {
+  const isServer = span.kind === api.SpanKind.SERVER;
+  switch (span.instrumentationLibrary.name) {
+    case '@opentelemetry/instrumentation-mysql':
+    case '@opentelemetry/instrumentation-mysql2':
+      return Component.MYSQL.id;
+    case '@opentelemetry/instrumentation-pg':
+      return Component.POSTGRESQL.id;
+    case '@opentelemetry/instrumentation-ioredis':
+    case '@opentelemetry/instrumentation-redis':
+      return Component.REDIS.id;
+
+    case '@opentelemetry/instrumentation-mongodb':
+      return Component.MONGODB.id;
+    case '@opentelemetry/instrumentation-express':
+      return Component.EXPRESS.id;
+    case '@opentelemetry/instrumentation-koa':
+      return Component.HTTP_SERVER.id;
+    case '@opentelemetry/instrumentation-http':
+      return isServer ? Component.HTTP_SERVER.id : Component.HTTP.id;
+    // case '@opentelemetry/instrumentation-graphql':
+    //   return 0
+    // case '@opentelemetry/instrumentation-grpc':
+    //   return 0
+    // case '@opentelemetry/instrumentation-dns':
+    //   return 0
+  }
+  return 0; // TODO: implement
+}
+
+function isError(span: Span): boolean {
+  return span.status.code === api.SpanStatusCode.ERROR;
+}
+
+function getLogList(span: Span): Array<Log> {
+  return span.events.map((event) => {
+    const log = new Log().setTime(getMilliseconds(event.time));
+    if (event.attributes) {
+      const pairs = attributeToPairs(event.attributes);
+      pairs.unshift(new KeyStringValuePair().setKey('event_name').setValue(event.name));
+      log.setDataList(pairs);
+    }
+    return log;
+  });
+}
+
+function getTagsList(span: Span): Array<KeyStringValuePair> {
+  return attributeToPairs(span.attributes);
+}
+function attributeToPairs(attributes: api.SpanAttributes | undefined): Array<KeyStringValuePair> {
+  if (!attributes) {
+    return [];
+  }
+  const pairs = [];
+  for (const key in attributes) {
+    if (attributes.hasOwnProperty(key)) {
+      const value = attributes[key];
+      if (value !== undefined && value != null) {
+        let str;
+        if (Array.isArray(value)) {
+          str = value.join(',');
+        } else {
+          str = value.toString();
+        }
+        const pair = new KeyStringValuePair().setKey(key).setValue(str);
+        pairs.push(pair);
+      }
+    }
+  }
+  return pairs;
 }

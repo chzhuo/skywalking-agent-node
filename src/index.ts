@@ -20,7 +20,8 @@
 import config, { AgentConfig, finalizeConfig } from './config/AgentConfig';
 import GrpcProtocol from './agent/protocol/grpc/GrpcProtocol';
 import { createLogger } from './logging';
-import PluginInstaller from './core/PluginInstaller';
+import { NodeTracerProvider } from './trace/NodeTracerProvider';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
 
 const logger = createLogger(__filename);
 
@@ -45,12 +46,14 @@ class Agent {
 
     this.started = true;
 
-    new PluginInstaller().install();
-
+    new NodeTracerProvider().start();
+    registerInstrumentations({
+      instrumentations: options.instrumentations,
+    });
     new GrpcProtocol().heartbeat().report();
   }
 }
 
-export default new Agent();
-export { default as ContextManager } from './trace/context/ContextManager';
-export { default as AzureHttpTriggerPlugin } from './azure/AzureHttpTriggerPlugin';
+const agent = new Agent();
+export const start = agent.start.bind(agent);
+export default agent; // compatible with skywalking-node-agent

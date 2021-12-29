@@ -38,7 +38,7 @@ export default class TraceReportClient implements Client {
   constructor() {
     this.reporterClient = new TraceSegmentReportServiceClient(
       config.collectorAddress,
-      config.secure ? grpc.credentials.createSsl() : grpc.credentials.createInsecure()
+      config.secure ? grpc.credentials.createSsl() : grpc.credentials.createInsecure(),
     );
     emitter.on('segment-finished', (segment) => {
       this.buffer.push(segment);
@@ -68,11 +68,11 @@ export default class TraceReportClient implements Client {
         try {
           for (const segment of this.buffer) {
             if (segment) {
-              if (logger._isDebugEnabled) {
-                logger.debug('Sending segment ', { segment });
+              const adaptedSegment = new SegmentObjectAdapter(segment);
+              if (logger.isDebugEnabled()) {
+                logger.debug('Adapted segment ', adaptedSegment.toObject());
               }
-
-              stream.write(new SegmentObjectAdapter(segment));
+              stream.write(adaptedSegment);
             }
           }
         } finally {
